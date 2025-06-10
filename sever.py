@@ -1,53 +1,46 @@
 import socket
 import threading
 
-HOST = '127.0.0.1'
-PORT = 1489
-LIMIT = 10
-active_clients = []
+clients = []
+usernames = []
 
-def listen_from_message(client, username):
-    while True:
-        message = client.recv(2048).decode('utf-8')
-        if message:
-            final_msg = username + '~' + message
-            sending_message_to_all(final_msg)
-        else:
-            print(f"Message from {username} is empty")
+def broadcast(message, _client_socket):
+    for client in clients:
+        if client != _client_socket:
+            client.send(message)
 
-def send_message_to_client(client, message):
-    client.sendall(message.encode())
-
-def sending_message_to_all(message):
-    for user in active_clients:
-        send_message_to_client(user[1], message)
-
-def client_handler(client):
-    while True:
-        username = client.recv(2048).decode('utf-8')
-        if username:
-            active_clients.append((username, client))
-            prompt_message = "CHATBOT ~" + f"{username} joined the chat"
-            sending_message_to_all(prompt_message)
-            break
-        else:
-            print("Username should not be empty")
-
-    threading.Thread(target=listen_from_message, args=(client, username,)).start()
+def handle_client(client_socket):
+    try:
+        # First message is the username
+        username = client_socket.recv(1024).decode('utf-8')
+        usernames.append(username)
+        clients.append(client_socket)
+        broadcast(f"[{username} joined the chat]".encode('utf-8'), client_socket)
+        print(f"{username} connected.")
+        
+        while True:
+            msg = client_socket.recv(1024)
+            if not msg: break
+            broadcast(f"{username}: {msg.decode('utf-8')}".encode('utf-8'), client_socket)
+    finally:
+        idx = clients.index(client_socket)
+        client_socket.close()
+        clients.remove(client_socket)
+        left_username = usernames.pop(idx)
+        broadcast(f"[{left_username} left the chat]".encode('utf-8'), None)
+        print(f"{left_username} disconnected.")
 
 def main():
+    host = "0.0.0.0"
+    port = 12345
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        server.bind((HOST, PORT))
-        print(f"Running the server on {HOST} {PORT}")
-    except Exception as e:
-        print(f"Unable to connect to Host {HOST} and port {PORT}")
-
-    server.listen(LIMIT)
+    server.bind((host, port))
+    server.listen()
+    print(f"Server listening on {host}:{port}")
+    
     while True:
-        client, address = server.accept()
-        print(f"Successfully connected to client {address[0]} {address[1]}")
-        threading.Thread(target=client_handler, args=(client,)).start()
+        client_sock, addr = server.accept()
+        threading.Thread(target=handle_client, args=(client_sock,)).start()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
